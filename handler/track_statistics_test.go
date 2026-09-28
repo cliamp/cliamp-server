@@ -20,13 +20,13 @@ func TestTrackListenersExpireAfterWindow(t *testing.T) {
 	start := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 	norway := geo.Location{Country: "Norway", CountryCode: "NO"}
 
-	if n, total := listeners.Touch("lofi", "203.0.113.1", norway, start); n != 1 || total != 1 {
+	if n, total, _ := listeners.Touch("lofi", "203.0.113.1", "a", norway, start); n != 1 || total != 1 {
 		t.Fatalf("first touch = (%d, %d), want (1, 1)", n, total)
 	}
-	if n, total := listeners.Touch("lofi", "203.0.113.1", norway, start.Add(time.Minute)); n != 1 || total != 1 {
+	if n, total, _ := listeners.Touch("lofi", "203.0.113.1", "b", norway, start.Add(time.Minute)); n != 1 || total != 1 {
 		t.Fatalf("repeat touch = (%d, %d), want (1, 1)", n, total)
 	}
-	if n, total := listeners.Touch("jazz", "203.0.113.2", geo.Location{}, start.Add(2*time.Minute)); n != 1 || total != 2 {
+	if n, total, _ := listeners.Touch("jazz", "203.0.113.2", "a", geo.Location{}, start.Add(2*time.Minute)); n != 1 || total != 2 {
 		t.Fatalf("jazz touch = (%d, %d), want (1, 2)", n, total)
 	}
 
@@ -39,8 +39,35 @@ func TestTrackListenersExpireAfterWindow(t *testing.T) {
 	}
 
 	later := start.Add(2*time.Minute + trackListenerWindow)
-	if n, total := listeners.Touch("lofi", "203.0.113.3", geo.Location{}, later); n != 1 || total != 1 {
+	if n, total, _ := listeners.Touch("lofi", "203.0.113.3", "a", geo.Location{}, later); n != 1 || total != 1 {
 		t.Errorf("touch after expiry = (%d, %d), want (1, 1)", n, total)
+	}
+}
+
+func TestTrackListenersReportRepeatRequests(t *testing.T) {
+	listeners := NewTrackListeners()
+	start := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name    string
+		ip      string
+		trackID string
+		at      time.Duration
+		repeat  bool
+	}{
+		{name: "first request", ip: "203.0.113.1", trackID: "a", at: 0, repeat: false},
+		{name: "second request for the same track", ip: "203.0.113.1", trackID: "a", at: time.Second, repeat: true},
+		{name: "other client", ip: "203.0.113.2", trackID: "a", at: 2 * time.Second, repeat: false},
+		{name: "other track", ip: "203.0.113.1", trackID: "b", at: 3 * time.Second, repeat: false},
+		{name: "same track after the window", ip: "203.0.113.1", trackID: "b", at: 3*time.Second + trackRepeatWindow, repeat: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, repeat := listeners.Touch("lofi", tt.ip, tt.trackID, geo.Location{}, start.Add(tt.at))
+			if repeat != tt.repeat {
+				t.Errorf("repeat = %v, want %v", repeat, tt.repeat)
+			}
+		})
 	}
 }
 
@@ -64,12 +91,15 @@ func TestTrackStatisticsResponses(t *testing.T) {
 	listeners := NewTrackListeners()
 	file := &TrackFile{Index: idx, StatsDB: db, Listeners: listeners}
 
+	// The second request from 203.0.113.1 repeats the first one and is not a
+	// new play.
 	for _, play := range []struct {
 		ip    string
 		track int
 	}{
 		{"203.0.113.1", 1},
 		{"203.0.113.1", 1},
+		{"203.0.113.2", 1},
 		{"203.0.113.2", 0},
 	} {
 		id := idx.entries[play.track].ID

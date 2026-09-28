@@ -118,6 +118,54 @@ func TestTrackStatisticsRoutes(t *testing.T) {
 	}
 }
 
+func TestStationsRouteUsesConfigOrder(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Stations = map[string]config.StationConfig{
+		"omarchy": {Name: "Omarchy", ExposeTracks: true},
+		"lofi":    {Name: "Lofi"},
+	}
+	cfg.StationOrder = []string{"lofi", "omarchy"}
+	stations := map[string]*Station{
+		"omarchy": {
+			Hub:    broadcast.NewHub("omarchy", nil, 64, 0),
+			Config: cfg.Stations["omarchy"],
+			Tracks: []library.Track{{Path: "/music/a.mp3"}, {Path: "/music/b.mp3"}},
+		},
+		"lofi": {
+			Hub:    broadcast.NewHub("lofi", nil, 64, 0),
+			Config: cfg.Stations["lofi"],
+		},
+	}
+	srv := New(cfg, stations, nil, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "https://radio.example/stations", nil)
+	srv.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got struct {
+		Stations []struct {
+			ID        string `json:"id"`
+			Tracks    int    `json:"tracks"`
+			TracksURL string `json:"tracks_url"`
+		} `json:"stations"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Stations) != 2 || got.Stations[0].ID != "lofi" || got.Stations[1].ID != "omarchy" {
+		t.Fatalf("stations = %#v, want lofi then omarchy", got.Stations)
+	}
+	if got.Stations[0].Tracks != 0 || got.Stations[0].TracksURL != "" {
+		t.Errorf("lofi = %#v, want no tracks", got.Stations[0])
+	}
+	if got.Stations[1].Tracks != 2 || got.Stations[1].TracksURL != "https://radio.example/omarchy/tracks" {
+		t.Errorf("omarchy = %#v, want 2 tracks with a tracks URL", got.Stations[1])
+	}
+}
+
 func newTestServer() *Server {
 	cfg := config.Defaults()
 	cfg.Stations = map[string]config.StationConfig{

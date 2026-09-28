@@ -11,7 +11,33 @@ Each station exposes three endpoints under its ID prefix:
 | `/<id>/stream.m3u` | `audio/x-mpegurl` | M3U playlist file pointing to the stream |
 | `/streams.pls` | `audio/x-scpls` | PLS playlist file listing all stations |
 | `/streams.m3u` | `audio/x-mpegurl` | M3U playlist file listing all stations |
+| `/stations` | `application/json` | Station directory with stream URLs and exposed track counts |
 | `/logo.svg` | `image/svg+xml` | CLIAMP station logo for players and directory listings |
+
+`/stations` lists every station in config file order. `tracks` is the number of tracks the station exposes, and `tracks_url` is present only when the station has `expose_tracks = true`. A client can use this document to decide which stations it opens as a playlist and which it plays as a live stream.
+
+```json
+{
+  "stations": [
+    {
+      "id": "lofi",
+      "name": "Lofi",
+      "description": "Lofi 24/7",
+      "genre": "Lofi",
+      "stream": "https://radio.example/lofi/stream",
+      "tracks": 0
+    },
+    {
+      "id": "omarchy",
+      "name": "Omarchy",
+      "genre": "Electronic",
+      "stream": "https://radio.example/omarchy/stream",
+      "tracks": 33,
+      "tracks_url": "https://radio.example/omarchy/tracks"
+    }
+  ]
+}
+```
 
 The stream endpoint supports ICY metadata. Clients that send the `Icy-MetaData: 1` request header receive inline metadata blocks containing the current track title and artist.
 
@@ -29,7 +55,7 @@ Available for stations configured with `expose_tracks = true`.
 | `/<id>/tracks/statistics` | Aggregated play statistics for the exposed tracks of one station |
 | `/tracks/statistics` | Aggregated play statistics for the exposed tracks of all stations |
 
-Play counts and track statistics require `--stats-db`. A play is counted when a `GET` request starts at byte 0. `HEAD` requests and seeks into the middle of a track are not counted. Without a statistics database, every track reports `"plays": 0` and the statistics routes return 404.
+Play counts and track statistics require `--stats-db`. A play is counted when a `GET` request starts at byte 0. `HEAD` requests and seeks into the middle of a track are not counted. A new request for the same track from the same client IP address within 30 seconds is not counted, because players often send two requests to start one track. Without a statistics database, every track reports `"plays": 0` and the statistics routes return 404.
 
 ### Track Statistics
 

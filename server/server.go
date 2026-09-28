@@ -196,6 +196,24 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 	}
 	mux.Handle("/streams.m3u", &handler.GlobalPlaylistM3U{Stations: m3uStations})
 
+	directory := make([]handler.StationEntry, 0, len(stations))
+	for _, id := range cfg.StationOrder {
+		st := stations[id]
+		entry := handler.StationEntry{
+			ID:          id,
+			Name:        st.Config.Name,
+			Description: st.Config.Description,
+			Genre:       st.Config.Genre,
+			Stream:      "/" + id + "/stream",
+		}
+		if idx, ok := trackIndexes[id]; ok {
+			entry.Tracks = idx.Len()
+			entry.TracksURL = "/" + id + "/tracks"
+		}
+		directory = append(directory, entry)
+	}
+	mux.Handle("GET /stations", &handler.Stations{Entries: directory})
+
 	mux.Handle("/status", &handler.GlobalStatus{
 		Stations:  stationInfos,
 		StartTime: s.startTime,

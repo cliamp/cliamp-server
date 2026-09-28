@@ -57,6 +57,6 @@ Statistics work best when combined with GeoIP — without it, country and city f
 
 ### Track Statistics
 
-For stations with `expose_tracks = true`, the server also records each play of an exposed track. A play is a `GET` request for a track file that starts at byte 0. The server stores the track, the time, and the geo information of the client. It does not store the IP address.
+For stations with `expose_tracks = true`, the server also records each play of an exposed track. A play is a `GET` request for a track file that starts at byte 0. A repeat request for the same track from the same client within 30 seconds is not a new play. The server stores the track, the time, and the geo information of the client. It does not store the IP address.
 
 The public `/tracks/statistics` and `/<id>/tracks/statistics` endpoints return total plays, the all-time track listener peak, active track listeners, the top 10 countries and cities, the top 10 tracks, and a daily breakdown for the last 30 days. A client counts as an active track listener for 10 minutes after it starts a track. See [API](api.md#track-statistics) for the response format.

@@ -17,6 +17,12 @@ import (
 // typical songs, so a client that plays a playlist stays active.
 const trackListenerWindow = 10 * time.Minute
 
+// trackRepeatWindow is how long a new request for the same track from the
+// same client counts as the same play. Players often send two requests to
+// start one track. For example, cliamp probes the URL and then downloads the
+// file.
+const trackRepeatWindow = 30 * time.Second
+
 // topTrackLimit is the number of tracks in a top_tracks list.
 const topTrackLimit = 10
 
@@ -29,6 +35,7 @@ type TrackListeners struct {
 
 type trackListener struct {
 	lastPlay    time.Time
+	trackID     string
 	country     string
 	countryCode string
 }
@@ -38,9 +45,11 @@ func NewTrackListeners() *TrackListeners {
 	return &TrackListeners{stations: make(map[string]map[string]trackListener)}
 }
 
-// Touch marks ip as an active listener of station at now. It returns the
-// active listener count for station and the total for all stations.
-func (t *TrackListeners) Touch(station, ip string, loc geo.Location, now time.Time) (listeners, total int) {
+// Touch marks ip as an active listener of station at now, playing trackID.
+// It returns the active listener count for station and the total for all
+// stations. repeat is true when the same client requested the same track
+// within trackRepeatWindow, so the request is not a new play.
+func (t *TrackListeners) Touch(station, ip, trackID string, loc geo.Location, now time.Time) (listeners, total int, repeat bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -49,8 +58,12 @@ func (t *TrackListeners) Touch(station, ip string, loc geo.Location, now time.Ti
 		clients = make(map[string]trackListener)
 		t.stations[station] = clients
 	}
+	if prev, ok := clients[ip]; ok && prev.trackID == trackID && now.Sub(prev.lastPlay) < trackRepeatWindow {
+		repeat = true
+	}
 	clients[ip] = trackListener{
 		lastPlay:    now,
+		trackID:     trackID,
 		country:     loc.Country,
 		countryCode: loc.CountryCode,
 	}
@@ -62,7 +75,7 @@ func (t *TrackListeners) Touch(station, ip string, loc geo.Location, now time.Ti
 		}
 		total += n
 	}
-	return listeners, total
+	return listeners, total, repeat
 }
 
 // active returns the active listeners of station at now.

@@ -268,7 +268,11 @@ func (h *TrackFile) recordPlay(r *http.Request, id string) {
 		PlayedAt:    now,
 	}
 	if h.Listeners != nil {
-		play.Listeners, play.TotalListeners = h.Listeners.Touch(h.Index.StationID, ip, loc, now)
+		var repeat bool
+		play.Listeners, play.TotalListeners, repeat = h.Listeners.Touch(h.Index.StationID, ip, id, loc, now)
+		if repeat {
+			return
+		}
 	}
 
 	if err := h.StatsDB.RecordTrackPlay(play); err != nil {
