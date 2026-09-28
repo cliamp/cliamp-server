@@ -26,8 +26,81 @@ Available for stations configured with `expose_tracks = true`.
 | `/<id>/tracks` | JSON library listing with a persistent `plays` count for each track |
 | `/<id>/tracks.m3u` | M3U playlist containing every track |
 | `/<id>/tracks/<track-id>` | Direct audio file with range request support |
+| `/<id>/tracks/statistics` | Aggregated play statistics for the exposed tracks of one station |
+| `/tracks/statistics` | Aggregated play statistics for the exposed tracks of all stations |
 
-Play counts require `--stats-db`. A play is counted when a `GET` request starts at byte 0; `HEAD` requests and seeks into the middle of a track are excluded. Without a statistics database, every track reports `"plays": 0`.
+Play counts and track statistics require `--stats-db`. A play is counted when a `GET` request starts at byte 0. `HEAD` requests and seeks into the middle of a track are not counted. Without a statistics database, every track reports `"plays": 0` and the statistics routes return 404.
+
+### Track Statistics
+
+The track statistics endpoints are public and contain no IP addresses. They use the same structure as the radio statistics, with plays in place of sessions.
+
+```
+curl http://localhost:8000/radio/tracks/statistics
+curl http://localhost:8000/tracks/statistics
+```
+
+The server sees file requests, not playback. For this reason, the fields have these meanings:
+
+- `total_plays` counts every recorded play, including plays from before the upgrade that added track statistics.
+- `active_listeners` counts the client IP addresses that started a track on the station in the last 10 minutes.
+- `peak_listeners` is the all-time highest `active_listeners` value. Track peaks are separate from radio peaks.
+- `top_countries`, `top_cities` and `daily` count plays. They include only plays recorded after the upgrade. Country and city fields require GeoIP.
+- `top_tracks` lists up to 10 tracks with the most plays, in the same format as `/<id>/tracks`.
+- Track statistics have no listen hours, because the server cannot measure playback time for a downloaded file.
+
+Per-station response:
+
+```json
+{
+  "total_plays": 1520,
+  "peak_listeners": 14,
+  "active_listeners": 3,
+  "active_listener_countries": [
+    { "country": "Norway", "country_code": "NO", "listeners": 2 }
+  ],
+  "top_countries": [
+    { "country": "Norway", "country_code": "NO", "plays": 410 }
+  ],
+  "top_cities": [
+    { "city": "Oslo", "country_code": "NO", "plays": 120 }
+  ],
+  "top_tracks": [
+    {
+      "id": "9a5501dc8bfe5544",
+      "title": "Song Title",
+      "artist": "Artist Name",
+      "filename": "song.mp3",
+      "url": "https://radio.example/radio/tracks/9a5501dc8bfe5544",
+      "plays": 87
+    }
+  ],
+  "daily": [
+    { "date": "2026-09-28", "plays": 64 }
+  ]
+}
+```
+
+Global response:
+
+```json
+{
+  "total_plays": 2210,
+  "peak_listeners": 19,
+  "stations": {
+    "radio": {
+      "total_plays": 1520,
+      "peak_listeners": 14,
+      "active_listeners": 3,
+      "active_listener_countries": [],
+      "top_countries": [],
+      "top_cities": [],
+      "top_tracks": [],
+      "daily": []
+    }
+  }
+}
+```
 
 ## Status Endpoints
 

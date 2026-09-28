@@ -193,7 +193,7 @@ func TestTrackPlayCounts(t *testing.T) {
 		{station: "lofi", trackID: "second"},
 		{station: "jazz", trackID: "first"},
 	} {
-		if err := db.RecordTrackPlay(play.station, play.trackID); err != nil {
+		if err := db.RecordTrackPlay(TrackPlay{Station: play.station, TrackID: play.trackID, PlayedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -3,28 +3,18 @@ package stats
 import (
 	"database/sql"
 	"math"
-	"sync"
 	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
-const statsCacheTTL = time.Minute
-
 // DB wraps a SQLite database for persisting listener session statistics.
 type DB struct {
 	db *sql.DB
 
-	cacheMu    sync.Mutex
-	cache      map[string]cachedStats
-	generation map[string]uint64
-	inflight   map[string]chan struct{}
-}
-
-type cachedStats struct {
-	result    *StationStatsResult
-	expiresAt time.Time
+	stationCache *statsCache[*StationStatsResult]
+	trackCache   *statsCache[*TrackStatsResult]
 }
 
 // Session holds the data recorded when a listener disconnects.
@@ -77,13 +67,7 @@ func Open(path string) (*DB, error) {
 		db.Close()
 		return nil, err
 	}
-	const trackPlaySchema = `CREATE TABLE IF NOT EXISTS track_plays (
-		station TEXT    NOT NULL,
-		track_id TEXT   NOT NULL,
-		plays    INTEGER NOT NULL DEFAULT 0,
-		PRIMARY KEY (station, track_id)
-	)`
-	if _, err := db.Exec(trackPlaySchema); err != nil {
+	if err := createTrackPlaySchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -111,10 +95,9 @@ func Open(path string) (*DB, error) {
 	}
 
 	return &DB{
-		db:         db,
-		cache:      make(map[string]cachedStats),
-		generation: make(map[string]uint64),
-		inflight:   make(map[string]chan struct{}),
+		db:           db,
+		stationCache: newStatsCache(cloneStats),
+		trackCache:   newStatsCache(cloneTrackStats),
 	}, nil
 }
 
@@ -139,45 +122,8 @@ func (d *DB) Record(s Session) error {
 		return err
 	}
 
-	d.cacheMu.Lock()
-	d.generation[s.Station]++
-	delete(d.cache, s.Station)
-	d.cacheMu.Unlock()
+	d.stationCache.invalidate(s.Station)
 	return nil
-}
-
-// RecordTrackPlay increments the play count for one station track.
-func (d *DB) RecordTrackPlay(station, trackID string) error {
-	_, err := d.db.Exec(
-		`INSERT INTO track_plays (station, track_id, plays) VALUES (?, ?, 1)
-		 ON CONFLICT(station, track_id) DO UPDATE SET plays = plays + 1`,
-		station,
-		trackID,
-	)
-	return err
-}
-
-// TrackPlayCounts returns all recorded track play counts for a station.
-func (d *DB) TrackPlayCounts(station string) (map[string]int64, error) {
-	rows, err := d.db.Query(
-		`SELECT track_id, plays FROM track_plays WHERE station = ?`,
-		station,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	counts := make(map[string]int64)
-	for rows.Next() {
-		var trackID string
-		var plays int64
-		if err := rows.Scan(&trackID, &plays); err != nil {
-			return nil, err
-		}
-		counts[trackID] = plays
-	}
-	return counts, rows.Err()
 }
 
 // StationStatsResult holds aggregated statistics for a single station.
@@ -215,37 +161,9 @@ type DailyStats struct {
 
 // StationStats returns aggregated statistics for a single station.
 func (d *DB) StationStats(station string) (*StationStatsResult, error) {
-	for {
-		d.cacheMu.Lock()
-		if cached, ok := d.cache[station]; ok && time.Now().Before(cached.expiresAt) {
-			result := cloneStats(cached.result)
-			d.cacheMu.Unlock()
-			return result, nil
-		}
-		if done, ok := d.inflight[station]; ok {
-			d.cacheMu.Unlock()
-			<-done
-			continue
-		}
-		generation := d.generation[station]
-		done := make(chan struct{})
-		d.inflight[station] = done
-		d.cacheMu.Unlock()
-
-		result, err := d.stationStats(station)
-
-		d.cacheMu.Lock()
-		delete(d.inflight, station)
-		if err == nil && d.generation[station] == generation {
-			d.cache[station] = cachedStats{
-				result:    cloneStats(result),
-				expiresAt: time.Now().Add(statsCacheTTL),
-			}
-		}
-		close(done)
-		d.cacheMu.Unlock()
-		return result, err
-	}
+	return d.stationCache.get(station, func() (*StationStatsResult, error) {
+		return d.stationStats(station)
+	})
 }
 
 func (d *DB) stationStats(station string) (*StationStatsResult, error) {

@@ -101,23 +101,26 @@ func (d *DB) peakListeners(scope string) (int, error) {
 
 // RecordStationPeak stores station's peak listener count if it is a new high.
 func (d *DB) RecordStationPeak(station string, listeners int) error {
-	if err := d.recordPeak(stationPeakPrefix+station, listeners); err != nil {
+	if err := recordPeak(d.db, stationPeakPrefix+station, listeners); err != nil {
 		return err
 	}
 
-	d.cacheMu.Lock()
-	delete(d.cache, station)
-	d.cacheMu.Unlock()
+	d.stationCache.invalidate(station)
 	return nil
 }
 
 // RecordGlobalPeak stores the global peak listener count if it is a new high.
 func (d *DB) RecordGlobalPeak(listeners int) error {
-	return d.recordPeak(globalPeakScope, listeners)
+	return recordPeak(d.db, globalPeakScope, listeners)
 }
 
-func (d *DB) recordPeak(scope string, listeners int) error {
-	_, err := d.db.Exec(
+// execer is satisfied by *sql.DB and *sql.Tx.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func recordPeak(ex execer, scope string, listeners int) error {
+	_, err := ex.Exec(
 		`INSERT INTO listener_peaks (scope, peak_listeners) VALUES (?, ?)
 		 ON CONFLICT(scope) DO UPDATE SET peak_listeners = MAX(peak_listeners, excluded.peak_listeners)`,
 		scope,

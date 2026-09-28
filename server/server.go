@@ -84,6 +84,10 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 		http.ServeFileFS(w, r, assets, "logo.svg")
 	})
 
+	// Track listeners are shared so the global track peak covers all stations.
+	trackListeners := handler.NewTrackListeners()
+	trackIndexes := make(map[string]*handler.TrackIndex)
+
 	// Per-station routes
 	for id, st := range stations {
 		prefix := "/" + id
@@ -128,10 +132,23 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 
 		if st.Config.ExposeTracks {
 			idx := handler.NewTrackIndex(id, st.Config.Name, st.Tracks)
+			trackIndexes[id] = idx
 
 			mux.Handle(prefix+"/tracks", &handler.TracksJSON{Index: idx, StatsDB: statsDB})
 			mux.Handle(prefix+"/tracks.m3u", &handler.TracksM3U{Index: idx})
-			mux.Handle("GET "+prefix+"/tracks/{id}", &handler.TrackFile{Index: idx, StatsDB: statsDB})
+			mux.Handle("GET "+prefix+"/tracks/{id}", &handler.TrackFile{
+				Index:     idx,
+				StatsDB:   statsDB,
+				GeoDB:     geoDB,
+				Listeners: trackListeners,
+			})
+			if statsDB != nil {
+				mux.Handle("GET "+prefix+"/tracks/statistics", &handler.TrackStatistics{
+					Index:     idx,
+					StatsDB:   statsDB,
+					Listeners: trackListeners,
+				})
+			}
 
 			slog.Info("track listing exposed",
 				"station", id,
@@ -197,6 +214,14 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 			Stations: statsInfos,
 			StatsDB:  statsDB,
 		})
+
+		if len(trackIndexes) > 0 {
+			mux.Handle("GET /tracks/statistics", &handler.GlobalTrackStatistics{
+				Indexes:   trackIndexes,
+				StatsDB:   statsDB,
+				Listeners: trackListeners,
+			})
+		}
 	}
 
 	s.httpServer = &http.Server{

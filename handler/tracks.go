@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"cliamp-server/geo"
 	"cliamp-server/library"
 	"cliamp-server/stats"
 )
@@ -191,8 +193,10 @@ func (h *TracksM3U) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // TrackFile handles GET /{station}/tracks/{id} - one audio file.
 type TrackFile struct {
-	Index   *TrackIndex
-	StatsDB *stats.DB
+	Index     *TrackIndex
+	StatsDB   *stats.DB
+	GeoDB     *geo.DB         // Optional geo database (nil = no geo lookup)
+	Listeners *TrackListeners // Optional active listener tracker
 }
 
 func (h *TrackFile) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -236,13 +240,40 @@ func (h *TrackFile) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("inline; filename*=UTF-8''%s", urlEncode(filepath.Base(path))))
 
 	if h.StatsDB != nil && isTrackPlayRequest(r) {
-		if err := h.StatsDB.RecordTrackPlay(h.Index.StationID, id); err != nil {
-			slog.Error("failed to record track play", "station", h.Index.StationID, "track_id", id, "error", err)
-		}
+		h.recordPlay(r, id)
 	}
 
 	// ServeContent handles Range requests, If-Modified-Since and Content-Length.
 	http.ServeContent(w, r, filepath.Base(path), fi.ModTime(), f)
+}
+
+// recordPlay stores one play of track id with the client's location.
+func (h *TrackFile) recordPlay(r *http.Request, id string) {
+	now := time.Now()
+	ip := clientIP(r)
+
+	var loc geo.Location
+	if h.GeoDB != nil {
+		loc = h.GeoDB.Lookup(ip)
+	}
+
+	play := stats.TrackPlay{
+		Station:     h.Index.StationID,
+		TrackID:     id,
+		Country:     loc.Country,
+		CountryCode: loc.CountryCode,
+		City:        loc.City,
+		Latitude:    loc.Latitude,
+		Longitude:   loc.Longitude,
+		PlayedAt:    now,
+	}
+	if h.Listeners != nil {
+		play.Listeners, play.TotalListeners = h.Listeners.Touch(h.Index.StationID, ip, loc, now)
+	}
+
+	if err := h.StatsDB.RecordTrackPlay(play); err != nil {
+		slog.Error("failed to record track play", "station", h.Index.StationID, "track_id", id, "error", err)
+	}
 }
 
 // isTrackPlayRequest excludes HEAD requests and seeks into the middle of a

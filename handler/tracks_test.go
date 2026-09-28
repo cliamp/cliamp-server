@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cliamp-server/library"
 	"cliamp-server/stats"
@@ -25,7 +26,7 @@ func TestTracksJSONIncludesPlayCounts(t *testing.T) {
 		{Path: "/music/second.mp3", Title: "Second"},
 	})
 	for range 2 {
-		if err := db.RecordTrackPlay("lofi", idx.entries[0].ID); err != nil {
+		if err := db.RecordTrackPlay(stats.TrackPlay{Station: "lofi", TrackID: idx.entries[0].ID, PlayedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}

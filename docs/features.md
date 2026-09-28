@@ -54,3 +54,9 @@ To enable it:
 The public `/statistics` and `/<id>/statistics` endpoints return aggregated data: total sessions, listen hours, top 10 countries, top 10 cities, and a daily breakdown for the last 30 days. These endpoints require no authentication.
 
 Statistics work best when combined with GeoIP — without it, country and city fields will be empty.
+
+### Track Statistics
+
+For stations with `expose_tracks = true`, the server also records each play of an exposed track. A play is a `GET` request for a track file that starts at byte 0. The server stores the track, the time, and the geo information of the client. It does not store the IP address.
+
+The public `/tracks/statistics` and `/<id>/tracks/statistics` endpoints return total plays, the all-time track listener peak, active track listeners, the top 10 countries and cities, the top 10 tracks, and a daily breakdown for the last 30 days. A client counts as an active track listener for 10 minutes after it starts a track. See [API](api.md#track-statistics) for the response format.

@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"cliamp-server/broadcast"
 	"cliamp-server/config"
+	"cliamp-server/library"
+	"cliamp-server/stats"
 )
 
 func TestLogoEndpoint(t *testing.T) {
@@ -70,6 +73,49 @@ func TestStatusIncludesLogoURL(t *testing.T) {
 			t.Errorf("favicon = %q, want %q", got.Stations["omarchy"].Favicon, want)
 		}
 	})
+}
+
+func TestTrackStatisticsRoutes(t *testing.T) {
+	db, err := stats.Open(filepath.Join(t.TempDir(), "stats.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	tests := []struct {
+		name    string
+		statsDB *stats.DB
+		want    int
+	}{
+		{name: "with statistics", statsDB: db, want: http.StatusOK},
+		{name: "without statistics", statsDB: nil, want: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Defaults()
+			cfg.Stations = map[string]config.StationConfig{
+				"omarchy": {Name: "Omarchy", ExposeTracks: true},
+			}
+			cfg.StationOrder = []string{"omarchy"}
+			stations := map[string]*Station{
+				"omarchy": {
+					Hub:    broadcast.NewHub("omarchy", nil, 64, 0),
+					Config: cfg.Stations["omarchy"],
+					Tracks: []library.Track{{Path: "/music/song.mp3", Title: "Song"}},
+				},
+			}
+			srv := New(cfg, stations, nil, tt.statsDB)
+
+			for _, path := range []string{"/omarchy/tracks/statistics", "/tracks/statistics"} {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				srv.httpServer.Handler.ServeHTTP(rec, req)
+				if rec.Code != tt.want {
+					t.Errorf("GET %s status = %d, want %d", path, rec.Code, tt.want)
+				}
+			}
+		})
+	}
 }
 
 func newTestServer() *Server {
